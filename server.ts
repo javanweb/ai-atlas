@@ -5,6 +5,11 @@ import dotenv from 'dotenv';
 import sharp from 'sharp';
 import { GoogleGenAI } from '@google/genai';
 import { createServer as createViteServer } from 'vite';
+import {
+  visualSearchRouter,
+  initVisualSearch,
+  startAutoIndexWatch,
+} from './server/visualSearch';
 
 dotenv.config();
 if (!process.env.GEMINI_API_KEY) {
@@ -122,6 +127,12 @@ app.use(express.urlencoded({ extended: true, limit: '30mb' }));
 app.get('/api/health', (req, res) => {
   res.json({ status: 'ok', time: new Date().toISOString() });
 });
+
+// ============================================================================
+// ATLAS VISUAL PRODUCT SEARCH — ماژول مستقل جستجوی بصری محصول
+// Image → Preprocessing → Embedding → Vector Search → Re-ranking → Decision
+// ============================================================================
+app.use('/api/visual-search', visualSearchRouter);
 
 interface CatalogItem {
   code: string;
@@ -1398,6 +1409,11 @@ async function start() {
       res.sendFile(path.join(distPath, 'index.html'));
     });
   }
+
+  // راه‌اندازی موتور جستجوی بصری (بارگذاری ایندکس + ایندکس‌سازی خودکار در پس‌زمینه)
+  void initVisualSearch()
+    .then(() => startAutoIndexWatch())
+    .catch(e => console.error('[VisualSearch] init failed:', e?.message));
 
   app.listen(PORT, '0.0.0.0', () => {
     const keyStatus = getGeminiKey()

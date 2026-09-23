@@ -15,6 +15,7 @@ import { CategoryPage } from './pages/CategoryPage';
 import { AllCategoriesPage } from './pages/AllCategoriesPage';
 import { ProductDetailPage } from './pages/ProductDetailPage';
 import { SearchPage } from './pages/SearchPage';
+import { VisualSearchPage } from './pages/VisualSearchPage';
 import { CartPage } from './pages/CartPage';
 import { CheckoutPage } from './pages/CheckoutPage';
 import { AccountPage } from './pages/AccountPage';
@@ -54,6 +55,9 @@ export default function App() {
 
                   {/* 4. Search Results */}
                   <Route path="/search" element={<SearchPage />} />
+
+                  {/* 4.b Atlas Visual Product Search — جستجوی محصول با تصویر */}
+                  <Route path="/visual-search" element={<VisualSearchPage />} />
 
                   {/* 5. Cart */}
                   <Route path="/cart" element={<CartPage />} />

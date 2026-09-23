@@ -537,7 +537,7 @@ export const ProductsPage: React.FC = () => {
               className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl bg-orange-500 text-white text-xs font-bold hover:bg-orange-600 transition-colors shadow-sm cursor-pointer"
             >
               <RotateCcw className="w-4 h-4" />
-              <span>مشاهده تمام ۳۱۸ قطعه</span>
+              <span>مشاهده تمام ۸۶۴ قطعه</span>
             </button>
           </div>
         ) : viewMode === 'grid' ? (

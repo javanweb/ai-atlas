@@ -22,6 +22,7 @@ import {
   CheckCircle,
   Sparkles,
   Building2,
+  ScanSearch,
 } from 'lucide-react';
 import { adminService, AdminUser } from '../services/adminService';
 import { AdminLogin } from './AdminLogin';
@@ -35,6 +36,7 @@ import { AgenciesAdminModule } from './modules/AgenciesAdminModule';
 import { CustomerGradingModule } from './modules/CustomerGradingModule';
 import { SettingsSystemModule } from './modules/SettingsSystemModule';
 import { ClientsAdminModule } from './modules/ClientsAdminModule';
+import { VisualSearchModule } from './modules/VisualSearchModule';
 import { pricingCreditService } from '../services/pricingCreditService';
 import { toPersianDigits } from '../utils/formatters';
 
@@ -64,6 +66,7 @@ export const AdminLayout: React.FC = () => {
     else if (path.includes('/admin/clients')) setActiveTab('clients');
     else if (path.includes('/admin/agencies')) setActiveTab('agencies');
     else if (path.includes('/admin/grading') || path.includes('/admin/credit')) setActiveTab('customer_grading');
+    else if (path.includes('/admin/visual-search')) setActiveTab('visual_search');
     else if (path.includes('/admin/settings')) setActiveTab('settings');
     else if (path === '/admin' || path === '/admin/') setActiveTab('dashboard');
   }, [location.pathname]);
@@ -152,6 +155,12 @@ export const AdminLayout: React.FC = () => {
       badge: null,
     },
     {
+      id: 'visual_search',
+      label: 'جستجوی بصری محصول',
+      icon: ScanSearch,
+      badge: null,
+    },
+    {
       id: 'settings',
       label: 'تنظیمات و سیستم',
       icon: Settings,
@@ -189,6 +198,8 @@ export const AdminLayout: React.FC = () => {
         return <CustomersCrmModule />;
       case 'clients':
         return <ClientsAdminModule />;
+      case 'visual_search':
+        return <VisualSearchModule />;
       case 'agencies':
         return <AgenciesAdminModule />;
       case 'settings':

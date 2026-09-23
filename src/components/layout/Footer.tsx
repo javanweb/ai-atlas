@@ -264,7 +264,7 @@ export const Footer: React.FC = () => {
               </li>
               <li>
                 <Link to="/products" className="hover:text-[#F97316] transition-colors flex items-center justify-between group">
-                  <span>کاتالوگ کل محصولات (۳۱۸ قطعه)</span>
+                  <span>کاتالوگ کل محصولات (۸۶۴ قطعه)</span>
                   <ChevronLeft className="w-3 h-3 text-slate-500 group-hover:text-[#F97316] transition-colors" />
                 </Link>
               </li>

@@ -16,7 +16,12 @@ export default defineConfig(() => {
       // Do not modifyâfile watching is disabled to prevent flickering during agent edits.
       hmr: process.env.DISABLE_HMR !== 'true',
       // Disable file watching when DISABLE_HMR is true to save CPU during agent edits.
-      watch: process.env.DISABLE_HMR === 'true' ? null : {},
+      // پوشه‌ی data/ داده‌های اجرایی موتور جستجوی بصری است (ایندکس برداری،
+      // لاگ‌ها، درخواست‌ها) و نباید باعث ری‌لود/فلیکر شود.
+      watch:
+        process.env.DISABLE_HMR === 'true'
+          ? null
+          : { ignored: ['**/data/**', '**/scripts/**'] },
       // Allow the sandbox preview host so the app is reachable in hosted environments.
       allowedHosts: true as const,
       host: true,

@@ -39,7 +39,7 @@ export const SearchPage: React.FC = () => {
               type="text"
               value={localQuery}
               onChange={e => setLocalQuery(e.target.value)}
-              placeholder="جستجو در کاتالوگ ۳۱۸ قطعه با کد فنی (مانند AT-E045)، نام یا برند..."
+              placeholder="جستجو در کاتالوگ ۸۶۴ قطعه با کد فنی (مانند AT-E045)، نام یا برند..."
               className="w-full h-11 pr-10 pl-4 bg-slate-50 border border-[#E2E8F0] rounded-xl text-sm focus:outline-none focus:border-[#F97316] text-[#0A172F]"
             />
             <Search className="w-5 h-5 text-slate-400 absolute right-3 top-1/2 -translate-y-1/2" />

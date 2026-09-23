@@ -284,11 +284,11 @@ export const Header: React.FC = () => {
                 className="w-full h-11 pr-4 pl-24 bg-slate-50 hover:bg-white text-[#0A172F] text-xs sm:text-sm rounded-xl border border-[#E2E8F0] focus:border-[#F97316] focus:bg-white focus:outline-none transition-all placeholder:text-slate-400 shadow-inner"
               />
 
-              {/* Camera Icon for Visual Search */}
+              {/* Camera Icon for Visual Search → صفحه‌ی اطلس ویژوال سرچ */}
               <button
                 type="button"
-                onClick={() => setIsCameraModalOpen(true)}
-                title="جستجوی تصویری قطعه"
+                onClick={() => navigate('/visual-search')}
+                title="جستجوی تصویری قطعه (تشخیص قطعه با عکس)"
                 className="absolute left-14 top-1/2 -translate-y-1/2 p-1.5 rounded-lg text-slate-400 hover:text-[#F97316] hover:bg-orange-50 transition-colors cursor-pointer"
               >
                 <Camera className="w-4 h-4" />
@@ -544,11 +544,11 @@ export const Header: React.FC = () => {
               />
               <Search className="w-4 h-4 text-slate-400 absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none" />
 
-              {/* Camera AI Visual Part Search Trigger */}
+              {/* Camera AI Visual Part Search Trigger → صفحه‌ی اطلس ویژوال سرچ */}
               <button
                 type="button"
-                onClick={() => setIsCameraModalOpen(true)}
-                title="شناسایی تصویری قطعه با AI"
+                onClick={() => navigate('/visual-search')}
+                title="شناسایی تصویری قطعه با عکس"
                 className="absolute left-11 top-1/2 -translate-y-1/2 p-1 text-orange-500 hover:text-orange-600"
               >
                 <Camera className="w-4 h-4" />
@@ -628,7 +628,7 @@ export const Header: React.FC = () => {
                     >
                       <div className="flex items-center gap-1.5">
                         <Package className="w-4 h-4" />
-                        <span>مشاهده کل کاتالوگ (۳۱۸ قلم)</span>
+                        <span>مشاهده کل کاتالوگ (۸۶۴ قلم)</span>
                       </div>
                       <ChevronLeft className="w-3.5 h-3.5" />
                     </Link>
@@ -1254,7 +1254,7 @@ export const Header: React.FC = () => {
                 >
                   <div className="flex items-center gap-2">
                     <Package className="w-5 h-5" />
-                    <span>کاتالوگ کل قطعات (۳۱۸ قلم)</span>
+                    <span>کاتالوگ کل قطعات (۸۶۴ قلم)</span>
                   </div>
                   <ChevronLeft className="w-4 h-4" />
                 </Link>

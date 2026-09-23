@@ -29,6 +29,7 @@ import {
   Mouse,
   Settings,
   Clock,
+  ScanSearch,
 } from 'lucide-react';
 import { STORE_ASSETS } from '../assets/images';
 import { AiVisualPartSearchModal } from '../components/search/AiVisualPartSearchModal';
@@ -987,6 +988,51 @@ export const HomePage: React.FC = () => {
       {/* SECTION 5, 6, 7 CONTAINER - INSIDE MAX-W-7XL                              */}
       {/* ========================================================================= */}
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 space-y-12 my-8 sm:my-10">
+
+        {/* ========================================================================= */}
+        {/* ATLAS VISUAL SEARCH - پیدا کردن قطعه با عکس (جستجوی بصری محصول)            */}
+        {/* ========================================================================= */}
+        <section className="relative overflow-hidden rounded-2xl bg-gradient-to-l from-[#0A172F] via-[#152544] to-[#1E293B] text-white p-6 sm:p-7 border border-slate-700 shadow-md">
+          <div className="absolute -left-12 -bottom-14 w-56 h-56 bg-[#F97316]/20 rounded-full blur-3xl pointer-events-none" />
+          <div className="relative z-10 flex flex-col lg:flex-row items-center justify-between gap-6">
+            <div className="space-y-3 text-right max-w-2xl">
+              <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-orange-500/20 border border-orange-500/30 text-orange-300 text-[11px] font-bold">
+                <ScanSearch className="w-3.5 h-3.5 text-[#F97316]" />
+                <span>جستجوی محصول با تصویر — Atlas Visual Product Search</span>
+              </div>
+              <h3 className="text-lg sm:text-2xl font-black leading-tight">
+                کد قطعه را نمی‌دانید؟ فقط عکس آن را بفرستید
+              </h3>
+              <p className="text-xs sm:text-sm text-slate-300 leading-relaxed">
+                سیستم فقط بر اساس <strong className="text-orange-400">شکل، هندسه و ظاهر واقعی قطعه</strong> آن را با
+                تصاویر کالاهای اطلس مقایسه می‌کند: اگر همان کالا موجود باشد فقط همان را نشان می‌دهد، در غیر این صورت
+                نزدیک‌ترین کالاها را معرفی می‌کند و اگر کالای مناسبی نباشد، امکان ثبت درخواست ساخت/تأمین سفارشی فراهم است.
+              </p>
+              <div className="flex flex-wrap items-center gap-2 text-[11px] text-slate-300">
+                <span className="flex items-center gap-1.5 bg-white/10 px-2.5 py-1 rounded-lg">
+                  <Camera className="w-3.5 h-3.5 text-[#F97316]" />
+                  <span>آپلود یا عکس با دوربین</span>
+                </span>
+                <span className="flex items-center gap-1.5 bg-white/10 px-2.5 py-1 rounded-lg">
+                  <ScanSearch className="w-3.5 h-3.5 text-emerald-400" />
+                  <span>مقایسه‌ی شکلی و ساختاری</span>
+                </span>
+              </div>
+            </div>
+
+            <div className="shrink-0 w-full lg:w-auto">
+              <Link
+                to="/visual-search"
+                className="w-full lg:w-auto h-12 px-7 bg-[#F97316] hover:bg-[#EA580C] text-white font-bold text-xs sm:text-sm rounded-xl shadow-lg hover:shadow-xl transition-all flex items-center justify-center gap-2"
+              >
+                <Camera className="w-5 h-5" />
+                <span>جستجوی قطعه با عکس</span>
+                <ArrowLeft className="w-4 h-4" />
+              </Link>
+            </div>
+          </div>
+        </section>
+
         {/* ========================================================================= */}
         {/* POPULAR PRODUCTS - استعلام قیمت آنلاین قطعات پربازدید                       */}
         {/* ========================================================================= */}

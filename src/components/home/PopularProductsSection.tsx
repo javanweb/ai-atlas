@@ -127,7 +127,7 @@ export const PopularProductsSection: React.FC = () => {
           to="/products"
           className="inline-flex items-center gap-1.5 text-xs sm:text-sm font-bold text-[#F97316] hover:text-[#EA580C] transition-colors group"
         >
-          <span>مشاهده همه ۳۱۸ محصول</span>
+          <span>مشاهده همه ۸۶۴ محصول</span>
           <ArrowLeft className="w-4 h-4 group-hover:-translate-x-0.5 transition-transform" />
         </Link>
       </div>

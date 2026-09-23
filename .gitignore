@@ -5,5 +5,8 @@ coverage/
 .DS_Store
 *.log
 bun.lock*
+
+# داده‌های اجرایی موتور جستجوی بصری (ایندکس برداری، لاگ‌ها، درخواست‌ها)
+data/
 .env*
 !.env.example
