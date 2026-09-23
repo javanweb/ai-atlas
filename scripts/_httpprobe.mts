@@ -1,0 +1,14 @@
+import fs from 'fs'; import sharp from 'sharp';
+const idx=JSON.parse(fs.readFileSync('data/visual-search/vector-index.json','utf8'));
+const rec=(idx.records as any[]).find(r=>r.sku==='AT-E433');
+const buf=await sharp(fs.readFileSync(rec.imagePath)).resize(224,224,{fit:'inside'}).jpeg({quality:82}).toBuffer();
+const t0=Date.now();
+const r=await fetch('http://localhost:3000/api/visual-search/search',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({imageBase64:`data:image/jpeg;base64,${buf.toString('base64')}`,fileName:'IMG_001.jpg'})});
+const j:any=await r.json();
+console.log('HTTP', r.status, 'in', (Date.now()-t0)+'ms');
+console.log('resultType:', j.resultType);
+console.log('message:', j.message);
+console.log('exactMatch:', j.exactMatch? {code:j.exactMatch.code||j.exactMatch.sku, name:String(j.exactMatch.name||'').slice(0,40), url:j.exactMatch.url||j.exactMatch.productUrl}: null);
+console.log('similarMatches:', (j.similarMatches||[]).length, (j.similarMatches||[]).slice(0,3).map((m:any)=>m.code||m.sku).join(', '));
+console.log('hasScoreFields?', JSON.stringify(j).match(/score|similarity|percent/gi)||'none');
+console.log('customRequest:', j.customRequest? 'present':'none');

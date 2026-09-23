@@ -72,6 +72,38 @@ const VALID_STATUSES: CustomRequestStatus[] = [
 ];
 
 // ---------------------------------------------------------------------------
+// محافظِ نقاط پایانی داخلی (کالیبراسیون / عیب‌یابی)
+// ---------------------------------------------------------------------------
+/**
+ * این نقاط پایانی اطلاعات «داخلی» برمی‌گردانند (کاندیداها، امتیازها، مسیر تصمیم)
+ * و طبق نقشه راه هرگز نباید در معرض کاربر نهایی یا اینترنت عمومی باشند.
+ *
+ * قاعده‌ی دسترسی:
+ *   ۱. اگر VISUAL_SEARCH_ADMIN_TOKEN (یا ADMIN_TOKEN) تنظیم شده باشد →
+ *      فقط با هدر x-admin-token معتبر یا ?adminToken=... پاسخ می‌دهد.
+ *   ۲. اگر توکن تنظیم نشده باشد → فقط درخواست‌های «محلی» (loopback) مجازند؛
+ *      یعنی اسکریپت‌های کالیبراسیون روی همان سرور کار می‌کنند، ولی
+ *      دسترسی از اینترنت عمومی بسته است.
+ */
+function isLoopback(req: Request): boolean {
+  const ip = (req.socket?.remoteAddress || req.ip || '').replace('::ffff:', '');
+  return ip === '127.0.0.1' || ip === '::1' || ip === 'localhost';
+}
+
+function requireAdminAccess(req: Request, res: Response, next: express.NextFunction): void {
+  const expected = process.env.VISUAL_SEARCH_ADMIN_TOKEN || process.env.ADMIN_TOKEN || '';
+  if (expected) {
+    const provided = String(req.header('x-admin-token') || req.query.adminToken || '');
+    if (provided && provided === expected) return next();
+    res.status(403).json({ success: false, error: 'دسترسی به این نقطه پایانی مجاز نیست.' });
+    return;
+  }
+  if (isLoopback(req)) return next();
+  res.status(403).json({ success: false, error: 'دسترسی به این نقطه پایانی مجاز نیست.' });
+  return;
+}
+
+// ---------------------------------------------------------------------------
 // آمادگی و سلامت
 // ---------------------------------------------------------------------------
 
@@ -152,9 +184,9 @@ router.post('/search', async (req: Request, res: Response) => {
  * تحلیل داخلی یک تصویر: کاندیداها، امتیازهای بصری/ساختاری و مسیر تصمیم.
  * خروجی این نقطه پایانی هرگز به کاربر نمایش داده نمی‌شود (فقط پنل مدیریت).
  */
-router.post('/debug/score', async (req: Request, res: Response) => {
+router.post('/debug/score', requireAdminAccess, async (req: Request, res: Response) => {
   try {
-    const { imageBase64, weights } = req.body || {};
+    const { imageBase64, weights, sort, limit } = req.body || {};
     if (!imageBase64) return res.status(400).json({ success: false, error: 'تصویر لازم است.' });
     let normalizedWeights: { vector: number; structure: number; hash: number } | undefined;
     if (weights && typeof weights === 'object') {
@@ -170,6 +202,8 @@ router.post('/debug/score', async (req: Request, res: Response) => {
     const { response, trace } = await searchByImage({
       imageBase64,
       weights: normalizedWeights,
+      candidateSort: sort === 'vector' ? 'vector' : 'combined',
+      candidateLimit: Number(limit) || 10,
       verifier: createVerifier(undefined),
       onCandidates: rows => {
         candidates = rows;

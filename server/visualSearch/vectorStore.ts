@@ -53,6 +53,23 @@ export function decodeVector(b64: string, dim?: number): Float32Array {
   return out;
 }
 
+/**
+ * کدگذاری دقیق Float32 → Base64.
+ * بردارهای ابری (مثل Jina CLIP با ۱۰۲۴ بُعد) با ۸ بیت کوانتیزه نمی‌شوند؛
+ * چون اطلاعات جهت‌دار آن‌ها ظریف‌تر است و کوانتیزاسیون دقت بازیابی را کم می‌کند.
+ */
+export function encodeVectorF32(vec: Float32Array): string {
+  return Buffer.from(vec.buffer, vec.byteOffset, vec.byteLength).toString('base64');
+}
+
+export function decodeVectorF32(b64: string, dim: number): Float32Array {
+  const buf = Buffer.from(b64, 'base64');
+  const out = new Float32Array(dim);
+  const src = new Float32Array(buf.buffer, buf.byteOffset, Math.floor(buf.byteLength / 4));
+  for (let i = 0; i < dim && i < src.length; i++) out[i] = src[i];
+  return out;
+}
+
 interface SerializedRecord {
   id: string;
   productId: string;
@@ -63,7 +80,8 @@ interface SerializedRecord {
   view: EmbeddingView;
   provider: EmbeddingProviderName;
   dim: number;
-  vector: string; // base64 Int8
+  vector: string; // base64 (Int8 یا Float32 بر اساس encoding)
+  encoding?: 'int8' | 'f32';
   signature?: EmbeddingRecord['signature'];
 }
 
@@ -74,10 +92,16 @@ function normalize(vec: Float32Array): void {
   if (n > 1e-9) for (let i = 0; i < vec.length; i++) vec[i] /= n;
 }
 
+/**
+ * ضرب داخلی — فقط برای بردارهای هم‌ابعاد.
+ * اگر ابعاد متفاوت باشند (مثلاً ایندکسی با موتور محلی ۵۱۲ بُعدی و پرس‌وجویی
+ * با موتور ابری ۱۰۲۴ بُعدی)، به‌جای امتیاز بی‌معنا، منفی بی‌نهایت برمی‌گردد
+ * تا آن رکورد از رتبه‌بندی حذف شود.
+ */
 function dot(a: Float32Array, b: Float32Array): number {
-  const n = Math.min(a.length, b.length);
+  if (a.length !== b.length) return Number.NEGATIVE_INFINITY;
   let s = 0;
-  for (let i = 0; i < n; i++) s += a[i] * b[i];
+  for (let i = 0; i < a.length; i++) s += a[i] * b[i];
   return s;
 }
 
@@ -155,6 +179,7 @@ export class InMemoryVectorStore implements VectorStore {
       const qv = Float32Array.from(q.vector);
       normalize(qv);
       for (const stored of this.vectors) {
+        if (stored.vector.length !== qv.length) continue; // ابعاد ناهمخوان (ایندکس قدیمی)
         const sim = dot(qv, stored.vector);
         const prev = best.get(stored.meta.id);
         if (!prev || sim > prev.similarity) {
@@ -189,11 +214,16 @@ export class InMemoryVectorStore implements VectorStore {
     });
     const best = new Map<string, number>();
     for (const stored of this.vectors) {
+      // مقایسه بر پایه‌ی «هم‌ابعادیِ همان پرس‌وجو با همان بردار ذخیره‌شده» انجام
+      // می‌شود؛ نه بر پایه‌ی ابعاد اولین پرس‌وجو (پرس‌وجو می‌تواند چند نما با
+      // ابعاد مختلف داشته باشد و بردارهای ذخیره‌شده یک ابعاد ثابت).
       let top = -Infinity;
       for (const qv of prep) {
+        if (qv.length !== stored.vector.length) continue;
         const sim = dot(qv, stored.vector);
         if (sim > top) top = sim;
       }
+      if (top === -Infinity) continue; // ابعاد ناهمخوان (ایندکس قدیمی / موتور دیگر)
       const prev = best.get(stored.meta.productId);
       if (prev === undefined || top > prev) best.set(stored.meta.productId, top);
     }
@@ -274,7 +304,7 @@ export class JsonVectorStore extends InMemoryVectorStore {
         this.vectors = [];
         this.byId.clear();
         for (const rec of data.records || []) {
-          const vec = decodeVector(rec.vector, rec.dim);
+          const vec = rec.encoding === 'f32' ? decodeVectorF32(rec.vector, rec.dim) : decodeVector(rec.vector, rec.dim);
           normalize(vec);
           const meta = {
             id: rec.id,
@@ -333,7 +363,9 @@ export class JsonVectorStore extends InMemoryVectorStore {
     this.dirty = false;
     const records: SerializedRecord[] = this.vectors.map(v => ({
       ...v.meta,
-      vector: encodeVector(v.vector),
+      encoding: (v.meta.dim || v.vector.length) > 512 ? ('f32' as const) : ('int8' as const),
+      vector:
+        (v.meta.dim || v.vector.length) > 512 ? encodeVectorF32(v.vector) : encodeVector(v.vector),
       signature: v.signature,
     }));
     const tmp = `${this.filePath}.tmp`;

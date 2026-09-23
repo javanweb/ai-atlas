@@ -104,7 +104,10 @@ export interface StructureSignature {
   orientation: number[];
 }
 
-export type EmbeddingProviderName = 'local-visual-v1' | 'gemini-multimodal';
+export type EmbeddingProviderName = 'local-visual-v1' | 'gemini-multimodal' | 'jina-clip-v2' | 'jina-clip-v1';
+
+/** روش ذخیره‌سازی بردار: int8 (فشرده) یا f32 (دقیق — برای بردارهای ابری) */
+export type VectorEncoding = 'int8' | 'f32';
 
 export interface EmbeddingRecord {
   id: string;
@@ -116,6 +119,8 @@ export interface EmbeddingRecord {
   /** نوع «نما»ی این بردار: full | object | object-rot180 | object-flip */
   view: EmbeddingView;
   provider: EmbeddingProviderName;
+  /** روش ذخیره‌سازی (پیش‌فرض int8 برای سازگاری با ایندکس‌های قبلی) */
+  encoding?: VectorEncoding;
   dim: number;
   /** بردار ۵۱۲ بُعدی، نرمال‌شده */
   vector: Float32Array;
@@ -138,6 +143,8 @@ export const EMBEDDING_VIEWS: EmbeddingView[] = ['full', 'object', 'object-rot18
 export interface EmbeddingProvider {
   readonly name: EmbeddingProviderName;
   readonly dim: number;
+  /** بیشترین تعداد «نما»ی تولیدشده برای هر تصویر (برای محاسبه‌ی انتظار بردارها) */
+  readonly maxViews?: number;
   /** آیا این ارائه‌دهنده در محیط فعلی در دسترس است؟ */
   isAvailable(): boolean;
   /**
@@ -343,6 +350,14 @@ export interface VisualSearchSettings {
   maxSimilarResults: number;
   /** آستانه‌ی سخت‌گیرانه‌ی شباهت بصری برای حالت SIMILAR */
   similarScoreFloor: number;
+  /**
+   * کف «پرکردن فهرست مشابه‌ها».
+   * شرط نمایش نتیجه (SIMILAR) همان `similarScoreFloor` است، ولی فهرست باید
+   * ۳ تا ۶ کالا داشته باشد؛ اگر تعداد کاندیداهای بالای کف اصلی کمتر از ۳ باشد،
+   * بقیه از میان کاندیداهای بالای این کف (نزدیک‌ترین‌ها) پر می‌شود تا کاربر
+   * محصول درست را از دست ندهد — بدون آنکه آستانه‌ی اصلی سست شود.
+   */
+  similarFillFloor?: number;
   /** آستانه‌ی شباهت برای ورود کاندیدا به راستی‌آزمایی AI */
   candidateScoreFloor: number;
   /** آستانه‌ی شباهت برداری لازم برای تأیید EXACT توسط AI */

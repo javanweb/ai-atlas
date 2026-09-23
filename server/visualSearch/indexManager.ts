@@ -40,8 +40,16 @@ import { readIndexMeta, writeIndexMeta } from './store';
  * افزایش این عدد باعث می‌شود ایندکس‌های قدیمی نامعتبر تلقی و بازسازی شوند
  * (نسخه ۲: امضای ساختاری به‌تفکیک «نما» + حذف امضا از رکوردهای برداری)
  * (نسخه ۳: هش‌های ادراکی روی جسم ایزوله‌شده به‌تفکیک نما)
+ * (نسخه ۷: امضاهای محلی برای هر ۴ نما حتی وقتی موتور ابری فقط یک نما بردار می‌گیرد
+ *          ⇒ تشخیص «همان تصویر» نسبت به چرخش ۹۰/۱۸۰ درجه و آینه مقاوم ماند)
+ * (نسخه ۸: «نمای بردار» در متادیتای ایندکس ثبت می‌شود و تغییر آن بازسازی را
+ *          اجباری می‌کند + نمای پیش‌فرض Jina از «جسم بریده» به «تصویر کامل»
+ *          تغییر کرد؛ آزمون واقعی نشان داد نمای کامل در عکس‌های موبایل به‌مراتب
+ *          بهتر عمل می‌کند — فراخوانی «جسم بریده» همان تصویر را تقریباً یکسان
+ *          کد می‌کرد و محصول را در رتبه‌ی ۳-۶ می‌نشاند، در حالی که نمای کامل
+ *          همان محصول را رتبه‌ی ۱ می‌آورد با حاشیه‌ی اطمینان از مزاحم‌ها)
  */
-const INDEX_VERSION = 6;
+const INDEX_VERSION = 8;
 
 interface BuildState {
   building: boolean;
@@ -90,7 +98,9 @@ async function embedImage(
 }> {
   const buffer = fs.readFileSync(absPath);
   const p = prov as unknown as {
-    analyzeVariants?: (b: Buffer) => Promise<{ view: EmbeddingView; signature: ImageSignature }[]>;
+    analyzeVariants?: (b: Buffer) => Promise<
+      { view: EmbeddingView; signature: ImageSignature; skipVector?: boolean }[]
+    >;
   };
   const variants = p.analyzeVariants
     ? await p.analyzeVariants(buffer)
@@ -98,21 +108,25 @@ async function embedImage(
 
   const records: EmbeddingRecord[] = [];
   const signatures: { view: EmbeddingView; signature: ReturnType<typeof serializeSignature> }[] = [];
-  for (const { view, signature } of variants) {
-    records.push({
-      id: `${sku}::${view}`,
-      productId,
-      sku,
-      imagePath: absPath,
-      imageUrl,
-      imageType,
-      view,
-      provider: prov.name,
-      dim: signature.embedding.length,
-      vector: signature.embedding,
-      // امضای ساختاری در فایل signatures ذخیره می‌شود (کلید: productId::view)
-      signature: undefined,
-    });
+  for (const { view, signature, skipVector } of variants) {
+    // امضا (هش/ساختار) برای همه‌ی نماها ذخیره می‌شود؛ رکورد برداری فقط برای
+    // نماهایی که بردار معتبر دارند (بردارهای موتورهای مختلف قابل اختلاط نیستند).
+    if (!skipVector && signature.embedding.length === prov.dim) {
+      records.push({
+        id: `${sku}::${view}`,
+        productId,
+        sku,
+        imagePath: absPath,
+        imageUrl,
+        imageType,
+        view,
+        provider: prov.name,
+        dim: signature.embedding.length,
+        vector: signature.embedding,
+        // امضای ساختاری در فایل signatures ذخیره می‌شود (کلید: productId::view)
+        signature: undefined,
+      });
+    }
     signatures.push({ view, signature: serializeSignature(signature) });
   }
   return { records, signatures };
@@ -240,6 +254,42 @@ export interface BuildOptions {
  * ساخت/به‌روزرسانی ایندکس برداری همه‌ی تصاویر محصولات.
  * این فرآیند Batch است و در پس‌زمینه اجرا می‌شود.
  */
+/**
+ * «امضای نماهای فعالِ بردار» — برای تشخیص تغییر تنظیمات نما.
+ * مثلاً 'object' در برابر 'full' یا 'full,object'.
+ */
+function activeViewSignature(prov?: EmbeddingProvider): string {
+  const p = prov || provider();
+  const anyP = p as unknown as { viewSignature?: () => string; views?: () => string[] };
+  try {
+    if (typeof anyP.viewSignature === 'function') return anyP.viewSignature();
+    if (typeof anyP.views === 'function') return anyP.views().join(',');
+  } catch {
+    /* ignore */
+  }
+  return SUPPORTED_VIEWS.join(',');
+}
+
+/** ذخیره‌ی متادیتای ایندکس (نسخه، ارائه‌دهنده، هش تصاویر) — برای ادامه‌ی افزایشی */
+async function persistMeta(prov: EmbeddingProvider): Promise<void> {
+  try {
+    const st = store();
+    writeIndexMeta({
+      ...readIndexMeta(),
+      version: INDEX_VERSION,
+      provider: prov.name,
+      views: activeViewSignature(prov),
+      dim: prov.dim,
+      vectorCount: await st.count(),
+      durationMs: Date.now() - (state.startedAt || Date.now()),
+      lastIndexedAt: new Date().toISOString(),
+      imageHashes: Object.fromEntries(state.imageHashes),
+    } as Parameters<typeof writeIndexMeta>[0]);
+  } catch (e: any) {
+    console.warn('[VisualSearch] persistMeta failed:', e?.message);
+  }
+}
+
 export async function buildIndex(options: BuildOptions = {}): Promise<{
   processed: number;
   skipped: number;
@@ -276,46 +326,74 @@ export async function buildIndex(options: BuildOptions = {}): Promise<{
     let processed = 0;
     let skipped = 0;
 
-    for (const product of products) {
-      for (const image of product.images) {
-        state.current = `${product.sku} — ${image.imageType}`;
-        const contentHash = hashFileContent(image.imagePath);
+    /** یک تصویر: بررسی تغییر، تولید بردار، ذخیره */
+    const handleImage = async (
+      product: (typeof products)[number],
+      image: (typeof products)[number]['images'][number]
+    ): Promise<void> => {
+      state.current = `${product.sku} — ${image.imageType}`;
+      const contentHash = hashFileContent(image.imagePath);
 
-        // ایندکس افزایشی: اگر تصویر تغییری نکرده، از نو پردازش نشود
-        if (options.incremental !== false && contentHash && state.imageHashes.get(image.imagePath) === contentHash) {
-          const existing = getSignaturesForProduct(product.id);
-          if (Object.keys(existing).length > 0) {
-            skipped++;
-            state.processed++;
-            options.onProgress?.(state.processed, state.total, state.current);
-            continue;
-          }
+      // ایندکس افزایشی: اگر تصویر تغییری نکرده، از نو پردازش نشود
+      if (options.incremental !== false && contentHash && state.imageHashes.get(image.imagePath) === contentHash) {
+        const existing = getSignaturesForProduct(product.id);
+        if (Object.keys(existing).length > 0) {
+          skipped++;
+          state.processed++;
+          options.onProgress?.(state.processed, state.total, state.current);
+          return;
         }
-
-        try {
-          const { records, signatures } = await embedImage(
-            product.sku,
-            product.id,
-            image.imagePath,
-            image.imageUrl,
-            image.imageType,
-            prov
-          );
-          await st.upsert(records);
-          for (const sig of signatures) setSignature(product.id, sig.view, sig.signature);
-          state.imageHashes.set(image.imagePath, contentHash || `${image.imagePath}:${Date.now()}`);
-          processed++;
-        } catch (e: any) {
-          state.errors.push({
-            sku: product.sku,
-            image: image.imagePath.split(/[\\/]/).pop() || image.imagePath,
-            message: e?.message || 'خطای پردازش تصویر',
-          });
-        }
-        state.processed++;
-        options.onProgress?.(state.processed, state.total, state.current);
       }
-    }
+
+      try {
+        const { records, signatures } = await embedImage(
+          product.sku,
+          product.id,
+          image.imagePath,
+          image.imageUrl,
+          image.imageType,
+          prov
+        );
+        await st.upsert(records);
+        for (const sig of signatures) setSignature(product.id, sig.view, sig.signature);
+        state.imageHashes.set(image.imagePath, contentHash || `${image.imagePath}:${Date.now()}`);
+        processed++;
+      } catch (e: any) {
+        state.errors.push({
+          sku: product.sku,
+          image: image.imagePath.split(/[\\/]/).pop() || image.imagePath,
+          message: e?.message || 'خطای پردازش تصویر',
+        });
+      }
+      state.processed++;
+      options.onProgress?.(state.processed, state.total, state.current);
+
+      // هر ۲۵ تصویر، پیشرفت روی دیسک ذخیره می‌شود تا در صورت قطع/ری‌استارت،
+      // ایندکس‌سازی «افزایشی» ادامه پیدا کند و از صفر شروع نشود.
+      if (state.processed % 25 === 0) {
+        persistSignatureFile();
+        await persistMeta(prov);
+        const fl = st as unknown as { flush?: () => Promise<void> };
+        if (fl.flush) await fl.flush();
+      }
+    };
+
+    const tasks: { product: (typeof products)[number]; image: (typeof products)[number]['images'][number] }[] = [];
+    for (const product of products) for (const image of product.images) tasks.push({ product, image });
+
+    // ارائه‌دهنده‌های محلی تک‌رشته‌ای‌اند (مصرف CPU)؛ ارائه‌دهنده‌های ابری با
+    // چند کارگر موازی اجرا می‌شوند تا درخواست‌ها به‌صورت دسته‌ای ارسال شوند.
+    const workers =
+      prov.name === 'local-visual-v1' ? 1 : Math.max(1, Number(process.env.VISUAL_SEARCH_INDEX_CONCURRENCY || 4));
+    let cursor = 0;
+    await Promise.all(
+      Array.from({ length: Math.min(workers, tasks.length) }, async () => {
+        while (cursor < tasks.length) {
+          const task = tasks[cursor++];
+          await handleImage(task.product, task.image);
+        }
+      })
+    );
 
     persistSignatureFile();
     // ذخیره‌ی اتمی انبار برداری
@@ -328,6 +406,10 @@ export async function buildIndex(options: BuildOptions = {}): Promise<{
     writeIndexMeta({
       version: INDEX_VERSION,
       provider: prov.name,
+      // «امضای نما» باید در متادیتای نهایی هم ثبت شود؛ در غیر این صورت
+      // تغییر تنظیمات نما در بوت بعدی تشخیص داده نمی‌شود.
+      views: activeViewSignature(prov),
+      dim: prov.dim,
       builtAt: lastIndexedAt,
       durationMs: lastDurationMs,
       productCount: products.length,
@@ -366,7 +448,10 @@ export async function initVisualSearch(): Promise<void> {
   const existing = await st.count();
   const products = loadProductRecords(true);
   const expectedImages = products.reduce((s, p) => s + p.images.length, 0);
-  const expectedVectors = expectedImages * SUPPORTED_VIEWS.length;
+  // هر ارائه‌دهنده ممکن است نمای کمتری تولید کند (مثلاً Jina دو نما) —
+  // پس انتظار بردارها بر اساس همان ارائه‌دهنده‌ی فعال محاسبه می‌شود.
+  const activeViews = Math.max(1, provider().maxViews || SUPPORTED_VIEWS.length);
+  const expectedVectors = expectedImages * activeViews;
 
   if (products.length === 0) {
     console.log('[VisualSearch] کاتالوگ خالی است؛ ایندکس ساخته نشد.');
@@ -374,16 +459,29 @@ export async function initVisualSearch(): Promise<void> {
   }
 
   const schemaChanged = !meta || meta.version !== INDEX_VERSION;
+  // اگر «تركیب نماهای بردار» عوض شده باشد (مثلاً از جسم بریده به تصویر کامل)،
+  // بردارهای ذخیره‌شده در فضای دیگری هستند و باید از صفر ساخته شوند.
+  const viewsChanged = !!meta?.views && meta.views !== activeViewSignature();
+  // اگر ارائه‌دهنده‌ی بردار عوض شده باشد (مثلاً از محلی به Jina)، بردارهای قبلی
+  // در فضای برداری دیگری هستند و مقایسه‌ی آن‌ها بی‌معناست ⇒ بازسازی کامل الزامی است.
+  const providerChanged = !!meta?.provider && meta.provider !== provider().name;
   const incomplete = existing < expectedVectors;
-  ready = !incomplete && !schemaChanged;
+  ready = !incomplete && !schemaChanged && !providerChanged && !viewsChanged;
 
-  if (existing === 0 || schemaChanged || incomplete) {
+  if (existing === 0 || schemaChanged || incomplete || providerChanged || viewsChanged) {
     console.log(
-      `[VisualSearch] ایندکس ناقص/نامعتبر است (${existing}/${expectedVectors} بردار) — بازسازی کامل در پس‌زمینه آغاز شد...`
+      providerChanged
+        ? `[VisualSearch] ارائه‌دهنده‌ی بردار تغییر کرده است (${meta?.provider} → ${provider().name}) — بازسازی کامل ایندکس آغاز شد...`
+        : viewsChanged
+          ? `[VisualSearch] ترکیب نمای بردار تغییر کرده است (${meta?.views} → ${activeViewSignature()}) — بازسازی کامل ایندکس آغاز شد...`
+          : `[VisualSearch] ایندکس ناقص/نامعتبر است (${existing}/${expectedVectors} بردار) — بازسازی کامل در پس‌زمینه آغاز شد...`
     );
     // بازسازی کامل در پس‌زمینه تا بالا آمدن سرور بلاک نشود
     setTimeout(() => {
-      void buildIndex({ incremental: false, reset: true }).catch(e =>
+      // اگر فقط «ناقص» است (نه تغییر نسخه/ارائه‌دهنده)، افزایشی ادامه بده؛
+      // در غیر این صورت ساخت کامل از صفر لازم است.
+      const incrementalResume = incomplete && !schemaChanged && !providerChanged && !viewsChanged;
+      void buildIndex({ incremental: incrementalResume, reset: !incrementalResume }).catch(e =>
         console.error('[VisualSearch] auto rebuild failed:', e?.message)
       );
     }, 400);
@@ -391,6 +489,30 @@ export async function initVisualSearch(): Promise<void> {
     console.log(
       `[VisualSearch] ایندکس بارگذاری شد: ${existing} بردار برای ${expectedImages} تصویر کاتالوگ (آماده‌ی جستجو)`
     );
+    // اگر متادیتای ایندکس قدیمی باشد و «امضای نما» را نداشته باشد، همان‌جا
+    // ثبت می‌شود تا تغییر بعدی تنظیمات نما بدون ابهام تشخیص داده شود.
+    if (!meta?.views || !meta?.dim) {
+      try {
+        writeIndexMeta({
+          ...(meta || {
+            version: INDEX_VERSION,
+            provider: provider().name,
+            builtAt: new Date().toISOString(),
+            durationMs: 0,
+            productCount: products.length,
+            imageCount: expectedImages,
+            vectorCount: existing,
+            errors: [],
+          }),
+          version: INDEX_VERSION,
+          provider: provider().name,
+          views: activeViewSignature(),
+          dim: provider().dim,
+        } as Parameters<typeof writeIndexMeta>[0]);
+      } catch {
+        /* ignore */
+      }
+    }
     // بازبینی تفاوت‌ها در پس‌زمینه (تصاویر جدید/تغییریافته)
     setTimeout(() => {
       void buildIndex({ incremental: true }).catch(() => undefined);

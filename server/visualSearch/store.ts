@@ -28,11 +28,55 @@ export const DEFAULT_SETTINGS: VisualSearchSettings = {
   maxSimilarResults: 6,
   preferredSimilarResults: 4,
   similarScoreFloor: 0.86,
+  similarFillFloor: 0.72,
   candidateScoreFloor: 0.55,
   exactVectorFloor: 0.78,
   useAiVerification: true,
   maxAiCandidates: 6,
 };
+
+/**
+ * آستانه‌های متناسب با موتور بردار فعال.
+ *
+ * مقیاس امتیازها بین موتورها متفاوت است: موتور محلی امتیازهای اشباع‌شده
+ * (۰.۸-۰.۹۸) تولید می‌کند، در حالی که بردارهای Jina در محدوده‌ی ۰.۵-۰.۸ هستند.
+ * اگر آستانه‌ها متناسب نشوند، یا همه‌چیز «مشابه» می‌شود یا هیچ‌چیز نمایش داده
+ * نمی‌شود. اگر مدیر آستانه‌ها را دستی تغییر داده باشد، همان مقدار محترم است.
+ */
+export const JINA_SETTINGS: Partial<VisualSearchSettings> = {
+  // کف مشابهت (نسخه ۸ ایندکس — نمای «تصویر کامل»):
+  //   • تصاویر بی‌ربط روی همین ایندکس ۰.۶۴ تا ۰.۷۲۴ امتیاز می‌گیرند
+  //     (پس‌زمینه‌ی یکدست ۰.۶۴۵، مستطیل ۰.۷۲۱، دایره ۰.۷۲۴، نویز ۰.۷۰۴)
+  //   • تطابق‌های واقعیِ عکس موبایل ۰.۷۴ تا ۰.۷۸ می‌گیرند
+  // پس کف روی ۰.۷۳۵ گذاشته شد: هم مزاحم‌های عمومی و هم شکلهی هندسی
+  // NO_MATCH می‌شوند و هم تطابق‌های واقعی حفظ می‌شوند.
+  similarScoreFloor: 0.735,
+  // کف پرکردن فهرست: کمی پایین‌تر از کف اصلی، تا فهرست ۳ تا ۶ تایی همیشه
+  // پر شود و کاربر محصول درست (که بالاتر از کف اصلی است) را از دست ندهد.
+  similarFillFloor: 0.6,
+  candidateScoreFloor: 0.45,
+  exactVectorFloor: 0.72,
+};
+
+/** آیا مقادیر ذخیره‌شده همان پیش‌فرض‌های موتور محلی‌اند (یعنی دستی تغییر نکرده‌اند)؟ */
+export function isUntouchedLocalDefaults(s: VisualSearchSettings): boolean {
+  return (
+    Math.abs(s.similarScoreFloor - DEFAULT_SETTINGS.similarScoreFloor) < 1e-6 &&
+    Math.abs(s.candidateScoreFloor - DEFAULT_SETTINGS.candidateScoreFloor) < 1e-6 &&
+    Math.abs(s.exactVectorFloor - DEFAULT_SETTINGS.exactVectorFloor) < 1e-6
+  );
+}
+
+/** تنظیمات مؤثر برای موتور بردار داده‌شده */
+export function settingsForProvider(
+  providerName: string | null,
+  s: VisualSearchSettings
+): VisualSearchSettings {
+  if (providerName && providerName.startsWith('jina') && isUntouchedLocalDefaults(s)) {
+    return { ...s, ...JINA_SETTINGS };
+  }
+  return s;
+}
 
 function readJson<T>(file: string, fallback: T): T {
   try {
@@ -69,6 +113,9 @@ export function saveSettings(patch: Partial<VisualSearchSettings>): VisualSearch
     Math.max(next.minSimilarResults, Math.round(next.preferredSimilarResults))
   );
   next.similarScoreFloor = Math.min(0.95, Math.max(0.4, next.similarScoreFloor));
+  if (next.similarFillFloor !== undefined) {
+    next.similarFillFloor = Math.min(next.similarScoreFloor, Math.max(0.3, next.similarFillFloor));
+  }
   next.candidateScoreFloor = Math.min(0.9, Math.max(0.2, next.candidateScoreFloor));
   next.exactVectorFloor = Math.min(0.98, Math.max(0.5, next.exactVectorFloor));
   next.maxAiCandidates = Math.min(12, Math.max(1, Math.round(next.maxAiCandidates)));
@@ -205,6 +252,12 @@ export interface IndexMeta {
   /** هش محتوای تصاویر در زمان آخرین ایندکس → ایندکس افزایشی پس از ری‌استارت */
   imageHashes?: Record<string, string>;
   errors: { sku: string; image: string; message: string }[];
+  /** ترکیب نماهای بردار در زمان ساخت ایندکس (مثلاً 'object' یا 'full') */
+  views?: string;
+  /** ابعاد بردار در زمان ساخت ایندکس (برای اعتبارسنجی سریع) */
+  dim?: number;
+  /** زمان آخرین ایندکس‌سازی موفق */
+  lastIndexedAt?: string;
 }
 
 export function readIndexMeta(): IndexMeta | null {

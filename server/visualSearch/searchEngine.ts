@@ -30,7 +30,7 @@ import { getVectorStore } from './vectorStore';
 import { hammingDistance } from './visualEncoder';
 import { loadProductRecords } from './catalog';
 import { getAllSignatures, getSignaturesForProduct, isReady } from './indexManager';
-import { getSettings } from './store';
+import { getSettings, settingsForProvider } from './store';
 import {
   type PairVerification,
   type VisualVerifier,
@@ -48,6 +48,21 @@ import { buildThumbnail, toDataUrl } from './imagePreprocess';
  * وزن‌های پیش‌فرض ترکیب سیگنال‌ها (کالیبره‌شده روی مجموعه‌ی آزمایشی اطلس).
  * قابل بازتعریف با متغیر محیطی VISUAL_SEARCH_WEIGHTS به شکل "v,s,h".
  */
+/**
+ * وزن‌های پیش‌فرض بر اساس موتور بردار فعال.
+ *
+ * چرا متفاوت؟ موتور محلی، شباهت کسینوسی اشباع‌شده تولید می‌کند (۰.۹۷ برای
+ * کالای درست و کالای اشتباه) و در نتیجه ساختار/هش تعیین‌کننده‌اند. بردارهای
+ * Jina برعکس، تفکیک‌کننده و مقیاس‌دارند (۰.۶ برای کالای درست در عکس واقعی)،
+ * پس باید وزن غالب را داشته باشند و ساختار/هش فقط نقش تثبیت‌کننده بگیرند.
+ */
+export const PROVIDER_WEIGHTS: Record<string, { vector: number; structure: number; hash: number }> = {
+  'local-visual-v1': { vector: 0.32, structure: 0.34, hash: 0.34 },
+  'gemini-multimodal': { vector: 0.5, structure: 0.25, hash: 0.25 },
+  'jina-clip-v1': { vector: 0.78, structure: 0.1, hash: 0.12 },
+  'jina-clip-v2': { vector: 0.78, structure: 0.1, hash: 0.12 },
+};
+
 export const FUSION_WEIGHTS = (() => {
   const raw = process.env.VISUAL_SEARCH_WEIGHTS;
   if (raw) {
@@ -67,6 +82,9 @@ export interface SearchOptions {
   settings?: VisualSearchSettings;
   /** بازتعریف وزن‌های ترکیب سیگنال‌ها (فقط برای کالیبراسیون/پنل مدیریت) */
   weights?: { vector: number; structure: number; hash: number };
+  /** فقط کالیبراسیون: ترتیب و تعداد کاندیداهای بازگشتی در onCandidates */
+  candidateSort?: 'combined' | 'vector';
+  candidateLimit?: number;
   /** فقط برای پنل مدیریت/کالیبراسیون: دریافت فهرست داخلی کاندیداها و امتیازها */
   onCandidates?: (rows: {
     sku: string;
@@ -147,7 +165,6 @@ export async function searchByImage(options: SearchOptions): Promise<{
   trace: DecisionTrace;
   thumbnail: string;
 }> {
-  const settings = options.settings || getSettings();
   const totalStart = Date.now();
 
   const baseResponse = (partial: Partial<VisualSearchResponse>): VisualSearchResponse => ({
@@ -191,6 +208,7 @@ export async function searchByImage(options: SearchOptions): Promise<{
   const thumbnail = await buildThumbnail(rawBuffer, 150);
 
   const provider = getEmbeddingProvider();
+  const settings = settingsForProvider(provider.name, options.settings || getSettings());
   const providerAny = provider as unknown as {
     analyzeVariants?: (b: Buffer) => Promise<{ view: EmbeddingView; signature: ImageSignature }[]>;
   };
@@ -198,13 +216,38 @@ export async function searchByImage(options: SearchOptions): Promise<{
     ? await providerAny.analyzeVariants(rawBuffer)
     : [{ view: 'full' as EmbeddingView, signature: await provider.analyzeImage(rawBuffer) }];
 
-  const queryVectors: SearchQueryVector[] = variants.map(v => ({
-    view: v.view,
-    vector: v.signature.embedding,
-  }));
+  /**
+   * فقط نماهایی که «بردار واقعیِ موتور» دارند وارد جستجوی برداری می‌شوند.
+   * (چون امضای ساختاری/هش برای هر ۴ نما محلی محاسبه می‌شود ولی بردار Jina
+   *  فقط برای نماهای تعیین‌شده گرفته می‌شود، نماهای بدون بردار باید حذف شوند؛
+   *  در غیر این صورت ابعاد ناهمخوان، تصادفاً همه‌ی نتایج را حذف می‌کند.)
+   */
+  const queryVectors: SearchQueryVector[] = variants
+    .filter(v => !!v.signature.embedding && v.signature.embedding.length === provider.dim)
+    .map(v => ({
+      view: v.view,
+      vector: v.signature.embedding,
+    }));
   /** امضای پرس‌وجو به تفکیک نما — برای انطباق ساختاری چندنما (مقاوم به چرخش/آینه) */
   const querySignatures = new Map<EmbeddingView, ImageSignature>();
   for (const v of variants) querySignatures.set(v.view, v.signature);
+
+  /**
+   * اگر هیچ بردار پرس‌وجویی تولید نشد (مثلاً قطعی موقت سرویس بردار)،
+   * پیام «پیدا نشد» به کاربر داده نمی‌شود؛ چون «پیدا نشد» یعنی «در کاتالوگ
+   * نیست» و اینجا جستجو اصلاً انجام نشده است.
+   */
+  if (queryVectors.length === 0) {
+    return {
+      response: baseResponse({
+        success: false,
+        message: 'موتور جستجوی تصویری در حال آماده‌سازی است. لطفاً چند لحظه بعد دوباره تلاش کنید.',
+        error: 'QUERY_EMBEDDING_UNAVAILABLE',
+      }),
+      trace,
+      thumbnail,
+    };
+  }
 
   // ۲) بازیابی (Retrieval): بهترین بردار هر محصول — بدون برش زودهنگام
   const retrievalStart = Date.now();
@@ -241,6 +284,9 @@ export async function searchByImage(options: SearchOptions): Promise<{
   // ۴) رتبه‌بندی مجدد بصری (Re-ranking)
   const decisionStart = Date.now();
   const candidates: Candidate[] = [];
+  // وزن‌های ترکیب بر اساس موتور بردار فعال (یک‌بار برای کل جستجو)
+  const activeWeights =
+    options.weights ?? PROVIDER_WEIGHTS[String(provider.name)] ?? FUSION_WEIGHTS;
   const allSignatures = getAllSignatures();
   const emptyHit = (productId: string): VectorSearchHit => ({
     id: `${productId}::none`,
@@ -280,7 +326,7 @@ export async function searchByImage(options: SearchOptions): Promise<{
     // ترکیب سه سیگنال مستقل: بردار بصری + ساختار هندسی + هش ادراکی
     // (وزن‌ها کالیبره‌شده‌اند: شباهت برداری روی کاتالوگ‌های هم‌خانواده اشباع
     //  می‌شود، در حالی که ساختار و هش قدرت تمایز بیشتری دارند.)
-    const w = options.weights ?? FUSION_WEIGHTS;
+    const w = activeWeights;
     const combined = w.vector * vectorScore + w.structure * structureScore + w.hash * hashSimilarity;
 
     candidates.push({
@@ -297,11 +343,17 @@ export async function searchByImage(options: SearchOptions): Promise<{
   }
 
   candidates.sort((a, b) => b.combined - a.combined);
-  const ranked = candidates.filter(c => c.combined >= settings.candidateScoreFloor || c.vectorScore >= 0.6);
+  const vectorFloor = String(provider.name).startsWith('jina') ? 0.5 : 0.6;
+  const ranked = candidates.filter(
+    c => c.combined >= settings.candidateScoreFloor || c.vectorScore >= vectorFloor
+  );
   trace.bestInternalScore = Number((candidates[0]?.combined || 0).toFixed(4));
 
+  const debugRows = options.candidateSort === 'vector'
+    ? [...candidates].sort((a, b) => b.vectorScore - a.vectorScore)
+    : candidates;
   options.onCandidates?.(
-    candidates.slice(0, 10).map(c => ({
+    debugRows.slice(0, Math.max(1, Math.min(200, options.candidateLimit ?? 10))).map(c => ({
       sku: c.product.sku,
       name: c.product.name,
       vectorScore: Number(c.vectorScore.toFixed(4)),
@@ -490,15 +542,40 @@ export async function searchByImage(options: SearchOptions): Promise<{
   }
 
   // ---- حالت SIMILAR: ۳ تا ۶ کالای نزدیک از نظر شکل و ظاهر ----
-  const similarPool = ranked
-    .filter(c => c.combined >= settings.similarScoreFloor)
-    .slice(0, settings.maxSimilarResults);
+  //
+  // دو کف مستقل:
+  //   • کف اصلی (`similarScoreFloor`) ⇒ شرط «آیا اصلاً پاسخی می‌دهیم؟»
+  //     (تصویر بی‌ربط به هیچ محصولی نمی‌رسد ⇒ NO_MATCH)
+  //   • کف پرکردن (`similarFillFloor`) ⇒ برای رساندن فهرست به ۳ تا ۶ کالا
+  //     وقتی فقط یک یا دو کالا بالای کف اصلی هستند (مثل عکس واقعی که فقط
+  //     محصول درست امتیاز بالا می‌گیرد). بدون این کف، محصولِ درستِ رتبه‌ی اول
+  //     به‌خاطر «کم بودن تعداد مشابه‌ها» از کاربر پنهان می‌شد.
+  const primary = ranked.filter(c => c.combined >= settings.similarScoreFloor);
+  const fillFloor =
+    settings.similarFillFloor ??
+    Math.max(settings.candidateScoreFloor, settings.similarScoreFloor - 0.12);
+  const similarPool = primary.slice(0, settings.maxSimilarResults);
+  if (similarPool.length > 0 && similarPool.length < settings.minSimilarResults) {
+    for (const c of ranked) {
+      if (similarPool.length >= settings.minSimilarResults) break;
+      if (similarPool.includes(c)) continue;
+      if (c.combined >= fillFloor) similarPool.push(c);
+    }
+  }
 
-  if (similarPool.length >= settings.minSimilarResults) {
+  // اگر حتی یک کالا بالای کف اصلی باشد، پاسخ SIMILAR داده می‌شود
+  // (وجودِ پاسخِ معنادار کافی است؛ تعداد کمتر از ۳ به معنی «پنهان‌کردن محصول
+  //  درست» است، پس فهرست با کف پایین‌تر پر می‌شود).
+  if (similarPool.length > 0) {
     const items = similarPool
       .slice(0, Math.max(settings.minSimilarResults, Math.min(settings.maxSimilarResults, similarPool.length)))
       .map(c => toItem(c.product, reasonForSimilar(c)));
-    trace.notes.push(`نتیجه: SIMILAR — ${items.length} کالای نزدیک نمایش داده می‌شود.`);
+    trace.notes.push(
+      `نتیجه: SIMILAR — ${items.length} کالای نزدیک نمایش داده می‌شود` +
+        (primary.length < settings.minSimilarResults
+          ? ` (${primary.length} کالا بالای کف اصلی؛ بقیه از نزدیک‌ترین‌ها پر شد).`
+          : '.')
+    );
     return {
       response: baseResponse({
         resultType: 'SIMILAR',
@@ -514,9 +591,9 @@ export async function searchByImage(options: SearchOptions): Promise<{
 
   // ---- حالت NO_MATCH: هیچ کالای مناسبی وجود ندارد ----
   trace.notes.push(
-    similarPool.length === 0
-      ? 'نتیجه: NO_MATCH — هیچ کاندیدای نزدیکی از نظر ساختار و ظاهر یافت نشد.'
-      : `نتیجه: NO_MATCH — تنها ${similarPool.length} کاندیدای نزدیک یافت شد که کمتر از حد لازم (${settings.minSimilarResults}) است؛ برای جلوگیری از پیشنهاد اشتباه، نتیجه‌ای نمایش داده نشد.`
+    'نتیجه: NO_MATCH — هیچ کاندیدایی به کف مشابهت (' +
+      settings.similarScoreFloor +
+      ') نرسید؛ برای جلوگیری از پیشنهاد اشتباه، نتیجه‌ای نمایش داده نشد.'
   );
   return {
     response: baseResponse({
